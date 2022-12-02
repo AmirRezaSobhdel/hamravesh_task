@@ -1,0 +1,60 @@
+version: "3.8"
+
+services:
+
+  docker:
+    container_name: docker
+    image: docker:18-dind
+    privileged: true
+    volumes:
+      - ./:/dind_data
+
+  django_app:
+    build: .
+    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./:/app
+    ports:
+      - 8000:8000
+    links:
+      - docker
+    environment:
+      DOCKER_HOST: tcp://docker:2375
+
+    depends_on:
+      - docker
+
+
+  redis:
+    image: redis:alpine
+    ports:
+      - 6379:6379
+
+  celery_worker:
+    restart: on-failure
+    build:
+      context: .
+    command: celery -A Hamravesh worker -l info
+    volumes:
+      - ./:/app
+    depends_on:
+      - redis
+      - django_app
+    environment:
+      DOCKER_HOST: tcp://docker:2375
+
+  flower:
+    build: .
+    command: celery -A Hamravesh flower
+    volumes:
+      - ./:/app
+    ports:
+      - 5555:5555
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379
+      DOCKER_HOST: tcp://docker:2375
+    depends_on:
+      - redis
+      - celery_worker
+#      - celery_beat
